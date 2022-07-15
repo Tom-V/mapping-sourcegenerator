@@ -1,6 +1,7 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -8,16 +9,23 @@ using System.Text;
 
 namespace MappingSourceGenerator
 {
+
+
     [Generator]
     public class MappingSourceGenerator : ISourceGenerator
     {
-
         private const string MapToAttribute = @"using System;
 
 namespace MappingSourceGenerator
 {
     [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
     sealed class MapToAttribute : Attribute
+    {
+        public Type ToType { get; set; }
+    }
+
+    [AttributeUsage(AttributeTargets.Property, Inherited = false, AllowMultiple = true)]
+    sealed class IgnorePropertyAttribute : Attribute
     {
         public Type ToType { get; set; }
     }
@@ -47,11 +55,26 @@ namespace MappingSourceGenerator
             var mapToAttribute = mapToAttributes.First();
             var toType = mapToAttribute.NamedArguments.First(f => f.Key == "ToType").Value.Value as ITypeSymbol;
 
-            var toTypeMembers = toType.GetMembers().OfType<IPropertySymbol>().Where(p => !p.IsReadOnly);
-            var fromTypeMembers = symbol.GetMembers().OfType<IPropertySymbol>().Where(p => !p.IsWriteOnly);
+            var toTypeMembers = toType.GetMembers()
+                                      .OfType<IPropertySymbol>()
+                                      .Where(p => !p.IsReadOnly);
+            var fromTypeMembers = symbol.GetMembers()
+                                        .OfType<IPropertySymbol>()
+                                        .Where(p => !p.IsWriteOnly &&
+                                                    !p.GetAttributes()
+                                                      .Any(at => at.AttributeClass.ToDisplayString() == "MappingSourceGenerator.IgnorePropertyAttribute" &&
+                                                                 (at.NamedArguments.FirstOrDefault(f => f.Key == "ToType").Value.IsNull ||
+                                                                 (at.NamedArguments.First(f => f.Key == "ToType").Value.Value as ITypeSymbol).Equals(toType, SymbolEqualityComparer.Default))));
 
-            var mapper = $@"using System;
+            var propsToMap = fromTypeMembers.Join(toTypeMembers, from => new { from.Type, from.Name }, to => new { to.Type, to.Name }, (from, to) => from.Name);
 
+            var propMapping = new StringBuilder();
+            foreach (var item in propsToMap)
+            {
+                propMapping.Append("            output.").Append(item).Append(" = input.").Append(item).AppendLine(";");
+            }
+
+            var mapper = $@"
 namespace {symbol.ContainingNamespace.ToDisplayString()}
 {{
     public static partial class Mapper 
@@ -59,8 +82,7 @@ namespace {symbol.ContainingNamespace.ToDisplayString()}
         public static {toType.ToDisplayString()} Map({symbol.ToDisplayString()} input)
         {{
             var output = new {toType.ToDisplayString()}();
-            // todo map all attributes
-
+{propMapping}
             Map(input, output);
 
             return output;
