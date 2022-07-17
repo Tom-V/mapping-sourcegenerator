@@ -2,7 +2,7 @@
 
 namespace MappingSourceGenerator.ConsoleApp.Dtos
 {
-    [MapTo(ToType = typeof(Entities.Person))]
+    [MapTo(typeof(Entities.Person), "ToEntity")]
     public class Person
     {
         //[IgnoreProperty(ForType = typeof(Entity.Person)]

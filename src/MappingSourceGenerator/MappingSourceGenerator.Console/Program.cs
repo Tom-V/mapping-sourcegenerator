@@ -14,7 +14,7 @@ class Program
             BirthDate = new DateTime(1989, 1, 14),
             Age = 33
         };
-        var result = Dtos.Mapper.Map(person);
+        var result = Dtos.Mapper.ToEntity(person);
         Console.WriteLine(result);
     }
 }

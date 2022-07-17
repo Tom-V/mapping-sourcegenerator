@@ -10,7 +10,6 @@ using System.Text;
 namespace MappingSourceGenerator
 {
 
-
     [Generator]
     public class MappingSourceGenerator : ISourceGenerator
     {
@@ -21,7 +20,14 @@ namespace MappingSourceGenerator
     [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
     sealed class MapToAttribute : Attribute
     {
+        public MapToAttribute(Type toType, string functionName)
+        {
+            ToType = toType;
+            FunctionName = functionName;
+        }
+
         public Type ToType { get; set; }
+        public string FunctionName{ get; set; }
     }
 
     [AttributeUsage(AttributeTargets.Property, Inherited = false, AllowMultiple = true)]
@@ -43,7 +49,7 @@ namespace MappingSourceGenerator
 
             foreach (var classSymbol in receiver.Classes)
             {
-                context.AddSource($"{classSymbol.Name}.g.cs", SourceText.From(CreateMapper(classSymbol, attributeSymbol), Encoding.UTF8));
+                context.AddSource($"{classSymbol.ToDisplayString()}.Mapper.g.cs", SourceText.From(CreateMapper(classSymbol, attributeSymbol), Encoding.UTF8));
             }
         }
 
@@ -53,7 +59,9 @@ namespace MappingSourceGenerator
             var mapToAttributes = symbol.GetAttributes()
                                         .Where(a => a.AttributeClass.Equals(attributeSymbol, SymbolEqualityComparer.Default));
             var mapToAttribute = mapToAttributes.First();
-            var toType = mapToAttribute.NamedArguments.First(f => f.Key == "ToType").Value.Value as ITypeSymbol;
+            var toType = mapToAttribute.ConstructorArguments[0].Value as ITypeSymbol;
+            var functionName = mapToAttribute.ConstructorArguments[1].Value as string;
+            var partialFunctionName = $"_{char.ToLower(functionName[0])}{functionName.Substring(1)}";
 
             var toTypeMembers = toType.GetMembers()
                                       .OfType<IPropertySymbol>()
@@ -79,16 +87,22 @@ namespace {symbol.ContainingNamespace.ToDisplayString()}
 {{
     public static partial class Mapper 
     {{
-        public static {toType.ToDisplayString()} Map({symbol.ToDisplayString()} input)
+        public static {toType.ToDisplayString()} {functionName}({symbol.ToDisplayString()} input)
         {{
             var output = new {toType.ToDisplayString()}();
 {propMapping}
-            Map(input, output);
+            {functionName}(input, output);
 
             return output;
         }}
 
-        static partial void Map({symbol.ToDisplayString()} input, {toType.ToDisplayString()} output);
+        public static void {functionName}({symbol.ToDisplayString()} input, {toType.ToDisplayString()} output)
+        {{
+{propMapping}
+            {partialFunctionName}(input, output);
+        }}
+
+        static partial void {partialFunctionName}({symbol.ToDisplayString()} input, {toType.ToDisplayString()} output);
 
     }}
 }}
@@ -125,8 +139,9 @@ namespace {symbol.ContainingNamespace.ToDisplayString()}
                 // any class with at least one attribute is a candidate for mapping generation
                 if (context.Node is ClassDeclarationSyntax classDeclarationSyntax && classDeclarationSyntax.AttributeLists.Count > 0)
                 {
-                    var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclarationSyntax) as ITypeSymbol;
-                    if (symbol.GetAttributes().Any(ad => ad.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapToAttribute"))
+                    var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclarationSyntax) as INamedTypeSymbol;
+                    if (symbol.Constructors.Any(c => c.Parameters.Length == 0) && // only with parameterless constructors
+                        symbol.GetAttributes().Any(ad => ad.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapToAttribute"))
                     {
                         Classes.Add(symbol);
                     }
