@@ -4,11 +4,12 @@ namespace MappingSourceGenerator.ConsoleApp.Dtos
 {
     [MapTo(typeof(Entities.Person), "ToPersonEntity")]
     [MapTo(typeof(Entities.Person2), "ToPerson2Entity")]
+    [MapFrom(typeof(Entities.Person), "ToPerson")]
+    [MapFrom(typeof(Entities.Person2), "ToPerson")]
     public class Person
     {
-        //[IgnoreProperty(ForType = typeof(Entity.Person)]
-        //[IgnoreProperty(ForType = typeof(Entity.Person2)]
-        //[IgnoreProperty()]
+        [IgnoreProperty(ToType = typeof(Entities.Person2))]
+        [IgnoreProperty(FromType = typeof(Entities.Person2))]
 
         public string LastName { get; set; }
         public string FirstName { get; set; }
@@ -28,12 +29,10 @@ BirthDate: {BirthDate}";
 
     [MapTo(typeof(Entities.Person), "ToPersonEntity")]
     [MapTo(typeof(Entities.Person2), "ToPerson2Entity")]
+    [MapFrom(typeof(Entities.Person), "ToPerson2")]
+    [MapFrom(typeof(Entities.Person2), "ToPerson2")]
     public class Person2
     {
-        //[IgnoreProperty(ForType = typeof(Entity.Person)]
-        //[IgnoreProperty(ForType = typeof(Entity.Person2)]
-        //[IgnoreProperty()]
-
         public string LastName { get; set; }
         public string FirstName { get; set; }
         public int Age { get; set; }

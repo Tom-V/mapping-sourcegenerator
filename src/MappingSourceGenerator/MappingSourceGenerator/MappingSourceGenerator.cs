@@ -19,6 +19,20 @@ namespace MappingSourceGenerator
 namespace MappingSourceGenerator
 {
     [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
+    sealed class MapFromAttribute : Attribute
+    {
+        public MapFromAttribute(Type fromType, string functionName)
+        {
+            FromType = fromType;
+            FunctionName = functionName;
+        }
+
+        public Type FromType { get; set; }
+        public string FunctionName{ get; set; }
+    }
+
+
+    [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
     sealed class MapToAttribute : Attribute
     {
         public MapToAttribute(Type toType, string functionName)
@@ -35,6 +49,7 @@ namespace MappingSourceGenerator
     sealed class IgnorePropertyAttribute : Attribute
     {
         public Type ToType { get; set; }
+        public Type FromType { get; set; }
     }
 }";
 
@@ -52,22 +67,34 @@ namespace MappingSourceGenerator
             }
         }
 
-        private string CreateMapper(ITypeSymbol fromType)
+        private string CreateMapper(ITypeSymbol baseType)
         {
 
-            var mapToAttributes = fromType.GetAttributes()
-                                          .Where(a => a.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapToAttribute");
+            var mapToAttributes = baseType.GetAttributes()
+                                          .Where(a => a.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapToAttribute")
+                                          .ToList();
+            var mapFromAttributes = baseType.GetAttributes()
+                                            .Where(a => a.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapFromAttribute")
+                                            .ToList();
 
-            var functions = new List<string>(mapToAttributes.Count());
+
+            var functions = new List<string>(mapToAttributes.Count + mapFromAttributes.Count);
             foreach (var mapToAttribute in mapToAttributes)
             {
                 var toType = mapToAttribute.ConstructorArguments[0].Value as ITypeSymbol;
                 var functionName = mapToAttribute.ConstructorArguments[1].Value as string;
-                functions.Add(BuildSingleMapper(fromType, toType, functionName));
+                functions.Add(BuildSingleMapper(baseType, toType, functionName));
+            }
+
+            foreach (var mapFromAttribute in mapFromAttributes)
+            {
+                var fromType = mapFromAttribute.ConstructorArguments[0].Value as ITypeSymbol;
+                var functionName = mapFromAttribute.ConstructorArguments[1].Value as string;
+                functions.Add(BuildSingleMapper(fromType, baseType, functionName));
             }
 
             var mapper = $@"
-namespace {fromType.ContainingNamespace.ToDisplayString()}
+namespace {baseType.ContainingNamespace.ToDisplayString()}
 {{
     public static partial class Mapper 
     {{
@@ -131,11 +158,11 @@ namespace {fromType.ContainingNamespace.ToDisplayString()}
 #if DEBUG
             if (!Debugger.IsAttached)
             {
-                Debugger.Launch();
+      //          Debugger.Launch();
             }
 #endif 
 
-            context.RegisterForPostInitialization((i) => i.AddSource("MapToAttribute.g.cs", MapToAttribute));
+            context.RegisterForPostInitialization((i) => i.AddSource("MappingSourceGenerator.MappingAttributes.g.cs", MapToAttribute));
             context.RegisterForSyntaxNotifications(() => new SyntaxReceiver());
         }
 
@@ -156,7 +183,9 @@ namespace {fromType.ContainingNamespace.ToDisplayString()}
                 {
                     var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclarationSyntax) as INamedTypeSymbol;
                     if (symbol.Constructors.Any(c => c.Parameters.Length == 0) && // only with parameterless constructors
-                        symbol.GetAttributes().Any(ad => ad.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapToAttribute"))
+                        symbol.GetAttributes()
+                              .Any(ad => ad.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapToAttribute"
+                                      || ad.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapFromAttribute"))
                     {
                         Classes.Add(symbol);
                     }
