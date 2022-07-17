@@ -8,7 +8,7 @@ namespace MappingSourceGenerator.ConsoleApp.Dtos
 {
     public static partial class Mapper
     {
-        static partial void _toEntity(Person input, Entities.Person output)
+        static partial void _toPersonEntity(Person input, Entities.Person output)
         {
             output.BirthDate = new DateTime(input.BirthDate.Year, input.BirthDate.Month, input.BirthDate.Day);
         }

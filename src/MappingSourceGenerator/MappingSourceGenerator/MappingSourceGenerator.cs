@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
@@ -44,50 +45,67 @@ namespace MappingSourceGenerator
             if (!(context.SyntaxContextReceiver is SyntaxReceiver receiver))
                 return;
 
-            INamedTypeSymbol attributeSymbol = context.Compilation.GetTypeByMetadataName("MappingSourceGenerator.MapToAttribute");
-
 
             foreach (var classSymbol in receiver.Classes)
             {
-                context.AddSource($"{classSymbol.ToDisplayString()}.Mapper.g.cs", SourceText.From(CreateMapper(classSymbol, attributeSymbol), Encoding.UTF8));
+                context.AddSource($"{classSymbol.ToDisplayString()}.Mapper.g.cs", SourceText.From(CreateMapper(classSymbol), Encoding.UTF8));
             }
         }
 
-        private string CreateMapper(ITypeSymbol symbol, INamedTypeSymbol attributeSymbol)
+        private string CreateMapper(ITypeSymbol fromType)
         {
 
-            var mapToAttributes = symbol.GetAttributes()
-                                        .Where(a => a.AttributeClass.Equals(attributeSymbol, SymbolEqualityComparer.Default));
-            var mapToAttribute = mapToAttributes.First();
-            var toType = mapToAttribute.ConstructorArguments[0].Value as ITypeSymbol;
-            var functionName = mapToAttribute.ConstructorArguments[1].Value as string;
-            var partialFunctionName = $"_{char.ToLower(functionName[0])}{functionName.Substring(1)}";
+            var mapToAttributes = fromType.GetAttributes()
+                                          .Where(a => a.AttributeClass.ToDisplayString() == "MappingSourceGenerator.MapToAttribute");
 
-            var toTypeMembers = toType.GetMembers()
-                                      .OfType<IPropertySymbol>()
-                                      .Where(p => !p.IsReadOnly);
-            var fromTypeMembers = symbol.GetMembers()
-                                        .OfType<IPropertySymbol>()
-                                        .Where(p => !p.IsWriteOnly &&
-                                                    !p.GetAttributes()
-                                                      .Any(at => at.AttributeClass.ToDisplayString() == "MappingSourceGenerator.IgnorePropertyAttribute" &&
-                                                                 (at.NamedArguments.FirstOrDefault(f => f.Key == "ToType").Value.IsNull ||
-                                                                 (at.NamedArguments.First(f => f.Key == "ToType").Value.Value as ITypeSymbol).Equals(toType, SymbolEqualityComparer.Default))));
-
-            var propsToMap = fromTypeMembers.Join(toTypeMembers, from => new { from.Type, from.Name }, to => new { to.Type, to.Name }, (from, to) => from.Name);
-
-            var propMapping = new StringBuilder();
-            foreach (var item in propsToMap)
+            var functions = new List<string>(mapToAttributes.Count());
+            foreach (var mapToAttribute in mapToAttributes)
             {
-                propMapping.Append("            output.").Append(item).Append(" = input.").Append(item).AppendLine(";");
+                var toType = mapToAttribute.ConstructorArguments[0].Value as ITypeSymbol;
+                var functionName = mapToAttribute.ConstructorArguments[1].Value as string;
+                functions.Add(BuildSingleMapper(fromType, toType, functionName));
             }
 
             var mapper = $@"
-namespace {symbol.ContainingNamespace.ToDisplayString()}
+namespace {fromType.ContainingNamespace.ToDisplayString()}
 {{
     public static partial class Mapper 
     {{
-        public static {toType.ToDisplayString()} {functionName}({symbol.ToDisplayString()} input)
+{string.Concat(functions)}
+    }}
+}}
+";
+
+            return mapper;
+        }
+
+        private string BuildSingleMapper(ITypeSymbol fromType, ITypeSymbol toType, string functionName)
+        {
+
+            var toTypeMembers = toType.GetMembers()
+                          .OfType<IPropertySymbol>()
+                          .Where(p => !p.IsReadOnly &&
+                                      !p.GetAttributes()
+                                        .Any(at => at.AttributeClass.ToDisplayString() == "MappingSourceGenerator.IgnorePropertyAttribute" &&
+                                                   (at.NamedArguments.FirstOrDefault(f => f.Key == "FromType").Value.IsNull ||
+                                                   (at.NamedArguments.First(f => f.Key == "FromType").Value.Value as ITypeSymbol).Equals(fromType, SymbolEqualityComparer.Default))));
+            var fromTypeMembers = fromType.GetMembers()
+                                          .OfType<IPropertySymbol>()
+                                          .Where(p => !p.IsWriteOnly &&
+                                                      !p.GetAttributes()
+                                                        .Any(at => at.AttributeClass.ToDisplayString() == "MappingSourceGenerator.IgnorePropertyAttribute" &&
+                                                                   (at.NamedArguments.FirstOrDefault(f => f.Key == "ToType").Value.IsNull ||
+                                                                   (at.NamedArguments.First(f => f.Key == "ToType").Value.Value as ITypeSymbol).Equals(toType, SymbolEqualityComparer.Default))));
+
+            var partialFunctionName = $"_{char.ToLower(functionName[0])}{functionName.Substring(1)}";
+            var propertiesToMap = fromTypeMembers.Join(toTypeMembers, from => new { from.Type, from.Name }, to => new { to.Type, to.Name }, (from, to) => from.Name);
+            var propMapping = new StringBuilder();
+            foreach (var property in propertiesToMap)
+            {
+                propMapping.Append("            output.").Append(property).Append(" = input.").Append(property).AppendLine(";");
+            }
+            var mapper = $@"
+        public static {toType.ToDisplayString()} {functionName}({fromType.ToDisplayString()} input)
         {{
             var output = new {toType.ToDisplayString()}();
 {propMapping}
@@ -96,16 +114,13 @@ namespace {symbol.ContainingNamespace.ToDisplayString()}
             return output;
         }}
 
-        public static void {functionName}({symbol.ToDisplayString()} input, {toType.ToDisplayString()} output)
+        public static void {functionName}({fromType.ToDisplayString()} input, {toType.ToDisplayString()} output)
         {{
 {propMapping}
             {partialFunctionName}(input, output);
         }}
 
-        static partial void {partialFunctionName}({symbol.ToDisplayString()} input, {toType.ToDisplayString()} output);
-
-    }}
-}}
+        static partial void {partialFunctionName}({fromType.ToDisplayString()} input, {toType.ToDisplayString()} output);
 ";
 
             return mapper;
